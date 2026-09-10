@@ -1,0 +1,18 @@
+# Normalise line endings so the repo is consistent across platforms.
+* text=auto
+
+# Rust / JS / docs / config are text.
+*.rs   text eol=lf
+*.js   text eol=lf
+*.html text eol=lf
+*.toml text eol=lf
+*.json text eol=lf
+*.md   text eol=lf
+
+# Font binaries — never diff or re-normalise these.
+*.woff2 binary
+*.ttf   binary
+*.otf   binary
+
+# Keep the demo binaries out of GitHub's language stats.
+samples/** linguist-generated=true

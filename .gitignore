@@ -1,0 +1,15 @@
+# Rust / Cargo build output
+/target
+
+# Cargo backup files from edition migrations
+**/*.rs.bk
+
+# Editor / OS cruft
+.DS_Store
+.idea/
+.vscode/
+
+# NOTE: Cargo.lock is committed on purpose — this is a binary crate, so a
+# lockfile gives anyone who clones it a reproducible build of the exact deps
+# (including the woofwoof / Google-woff2 FFI). The `samples/` fonts are also
+# committed so the browser demo works with no build step.

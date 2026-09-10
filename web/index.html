@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>font-scrambler — in-browser unscramble demo</title>
+    <style>
+      :root { color-scheme: light dark; --accent: #4f7cff; }
+      body {
+        font: 16px/1.6 system-ui, sans-serif;
+        margin: 0 auto; max-width: 940px; padding: 2rem 1.25rem 5rem;
+      }
+      h1 { font-size: 1.5rem; margin-bottom: 0.25rem; }
+      p.lede { color: #666; margin-top: 0; }
+      @media (prefers-color-scheme: dark) { p.lede { color: #9aa; } }
+      .bar { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin: 1.25rem 0; }
+      button, select, input[type="text"] {
+        font: inherit; padding: 0.45rem 0.8rem; border-radius: 8px;
+        border: 1px solid #bbb; background: #fff; cursor: pointer;
+      }
+      input[type="text"] { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; cursor: text; }
+      @media (prefers-color-scheme: dark) { button, select, input[type="text"] { background: #1c1c22; color: #eee; border-color: #444; } }
+      button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+      button:disabled { opacity: 0.5; cursor: default; }
+      .status { font-variant-numeric: tabular-nums; }
+      .status.ok { color: #178a4c; }
+      .status.err { color: #cf222e; }
+      .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px,1fr)); gap: 0.75rem; margin: 0.5rem 0 1.5rem; }
+      .metric { border: 1px solid #ddd; border-radius: 10px; padding: 0.6rem 0.75rem; }
+      @media (prefers-color-scheme: dark) { .metric { border-color: #333; } }
+      .metric b { display: block; font-size: 1.35rem; font-variant-numeric: tabular-nums; }
+      .metric span { font-size: 0.8rem; color: #777; }
+      label { font-size: 0.85rem; color: #777; }
+      .hint { font-size: 0.8rem; color: #999; }
+      input[type="range"] { vertical-align: middle; }
+      textarea {
+        width: 100%; box-sizing: border-box; font: inherit; font-size: 1rem;
+        padding: 0.6rem; border-radius: 8px; border: 1px solid #bbb; resize: vertical;
+      }
+      @media (prefers-color-scheme: dark) { textarea { background: #1c1c22; color: #eee; border-color: #444; } }
+      .specimen { border-top: 1px solid #ddd; margin-top: 1.5rem; padding-top: 1rem; }
+      .specimen h2 { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; color: #999; }
+      .rendered { margin: 0.25rem 0 1.5rem; }
+      code { background: rgba(127,127,127,0.15); padding: 0.1em 0.35em; border-radius: 4px; }
+    </style>
+  </head>
+  <body>
+    <h1>font-scrambler · in-browser unscramble</h1>
+    <p class="lede">
+      Loads a <b>scrambled</b> WOFF2, reconstructs the real font in memory and paints it —
+      the served file is never a usable font on its own.
+    </p>
+
+    <div class="bar">
+      <select id="sample" aria-label="Sample"></select>
+      <button id="load" class="primary">Load scrambled</button>
+      <button id="control">Load plain (control)</button>
+      <button id="reset">Reset</button>
+      <span id="status" class="status"></span>
+    </div>
+
+    <div class="bar">
+      <label>scheme
+        <select id="scheme" aria-label="Scheme">
+          <option value="xor">xor</option>
+          <option value="rev">rev</option>
+          <option value="swap">swap</option>
+        </select>
+      </label>
+      <label>key
+        <input id="key" type="text" size="12" spellcheck="false" autocomplete="off" aria-label="Key" />
+      </label>
+      <span class="hint">the key is preloaded — edit it and reload to watch the font fail to reconstruct</span>
+    </div>
+
+    <div class="metrics">
+      <div class="metric"><b id="m-fetch">–</b><span>fetch (ms)</span></div>
+      <div class="metric"><b id="m-unscramble">–</b><span>unscramble (ms)</span></div>
+      <div class="metric"><b id="m-total">–</b><span>font ready (ms)</span></div>
+      <div class="metric"><b id="m-size">–</b><span>file KB</span></div>
+    </div>
+
+    <div class="bar">
+      <label>size <input id="size" type="range" min="16" max="128" value="64" /></label>
+      <textarea id="text" rows="2">The quick brown fox jumps over the lazy dog</textarea>
+    </div>
+
+    <div class="specimen">
+      <h2>Unscrambled face</h2>
+      <p id="out" class="rendered">— font not loaded yet —</p>
+    </div>
+
+    <script type="module">
+      import { loadScrambledFont } from './unscramble.js'
+
+      // Edit this list to point at files you generated with the CLI. `url` is
+      // the scrambled artefact; `scheme`/`key`/`preserveMagic` are what the CLI
+      // used, preloaded into the inputs below so you can edit them live.
+      // `plainUrl` (optional) is a normally-served WOFF2 used as the timing control.
+      const SAMPLES = [
+        {
+          label: 'Quicksand (xor)',
+          url: '../samples/quicksand.scram.woff2',
+          plainUrl: '../samples/quicksand.plain.woff2',
+          family: 'Scram-Quicksand',
+          scheme: 'xor',
+          key: '0x1234abcd',
+          preserveMagic: true,
+        },
+      ]
+
+      const $ = (id) => document.getElementById(id)
+      const els = {
+        sample: $('sample'), load: $('load'), control: $('control'), reset: $('reset'),
+        status: $('status'), text: $('text'), sizeInput: $('size'),
+        schemeSel: $('scheme'), keyInput: $('key'),
+        out: $('out'),
+        mFetch: $('m-fetch'), mUnscramble: $('m-unscramble'), mTotal: $('m-total'), mSize: $('m-size'),
+      }
+
+      for (const [i, s] of SAMPLES.entries()) {
+        const o = document.createElement('option')
+        o.value = i; o.textContent = s.label
+        els.sample.appendChild(o)
+      }
+
+      // Selecting a sample preloads its scheme + key into the (editable) inputs.
+      function preloadConfig() {
+        const s = SAMPLES[+els.sample.value]
+        if (!s) return
+        els.schemeSel.value = s.scheme || 'xor'
+        els.keyInput.value = s.key ?? ''
+      }
+      els.sample.addEventListener('change', () => { preloadConfig(); reset() })
+      preloadConfig()
+
+      function paint() {
+        const text = els.text.value || '—'
+        const px = els.sizeInput.value + 'px'
+        els.out.textContent = text
+        els.out.style.fontSize = px
+      }
+      els.text.addEventListener('input', paint)
+      els.sizeInput.addEventListener('input', paint)
+      paint()
+
+      function setStatus(msg, cls = '') {
+        els.status.textContent = msg
+        els.status.className = 'status ' + cls
+      }
+
+      function reset() {
+        els.out.style.fontFamily = ''
+        els.out.textContent = '— font not loaded yet —'
+        for (const k of ['mFetch', 'mUnscramble', 'mTotal', 'mSize']) els[k].textContent = '–'
+        setStatus('')
+      }
+
+      async function doLoad() {
+        const s = SAMPLES[+els.sample.value]
+        if (!s) return
+        reset()
+        els.load.disabled = true
+        setStatus('loading\u2026')
+        try {
+          const cfg = {
+            scheme: els.schemeSel.value,
+            key: els.keyInput.value,
+            preserveMagic: s.preserveMagic !== false,
+          }
+          const t0 = performance.now()
+          const face = await loadScrambledFont(s.url, s.family, cfg)
+          const total = performance.now() - t0
+          els.out.style.fontFamily = `'${s.family}', system-ui`
+          paint()
+          els.mFetch.textContent = Math.round(total - (face._unscrambleMs || 0))
+          els.mUnscramble.textContent = (face._unscrambleMs || 0).toFixed(2)
+          els.mTotal.textContent = Math.round(total)
+          els.mSize.textContent = ((face._bytes || 0) / 1024).toFixed(1)
+          setStatus(`loaded "${s.family}"`, 'ok')
+        } catch (e) {
+          // A wrong key/scheme reconstructs bytes that are no longer valid
+          // WOFF2, so face.load() rejects \u2014 this is the expected failure.
+          setStatus(`failed to reconstruct (wrong key/scheme for ${s.label}?): ${e.message || e}`, 'err')
+          console.error(e)
+        } finally {
+          els.load.disabled = false
+        }
+      }
+
+      // Control: register a normally-served WOFF2 (sample.plainUrl) the ordinary
+      // way, so the two timings can be compared side by side.
+      async function doControl() {
+        const s = SAMPLES[+els.sample.value]
+        if (!s) return
+        if (!s.plainUrl) {
+          setStatus('no plainUrl on this sample — generate one with the CLI descramble step', 'err')
+          return
+        }
+        reset()
+        els.control.disabled = true
+        try {
+          const t0 = performance.now()
+          const face = new FontFace(s.family, `url(${s.plainUrl}) format('woff2')`)
+          await face.load()
+          document.fonts.add(face)
+          const total = performance.now() - t0
+          els.out.style.fontFamily = `'${s.family}', system-ui`
+          paint()
+          els.mTotal.textContent = Math.round(total)
+          els.mFetch.textContent = Math.round(total)
+          els.mUnscramble.textContent = '0'
+          setStatus(`control loaded in ${Math.round(total)}ms`, 'ok')
+        } catch (e) {
+          setStatus(String(e.message || e), 'err')
+        } finally {
+          els.control.disabled = false
+        }
+      }
+
+      els.load.addEventListener('click', doLoad)
+      els.control.addEventListener('click', doControl)
+      els.reset.addEventListener('click', reset)
+
+      // Auto-load the first sample so the page is useful on open.
+      if (SAMPLES.length) doLoad()
+    </script>
+  </body>
+</html>

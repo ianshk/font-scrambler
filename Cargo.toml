@@ -1,0 +1,24 @@
+[package]
+name = "font-scrambler"
+version = "0.1.0"
+edition = "2024"
+description = "Experimental CLI: convert TTF/OTF to WOFF2, then scramble the bytes so a browser reconstructs the font in memory (Typekit-style) instead of shipping a stealable file."
+
+[dependencies]
+# WOFF2 conversion — same crate + call shape as typefoundry-worker.
+woofwoof = "1.0"
+
+# Structural gate for the verify round-trip (parse the decoded SFNT).
+ttf-parser = "0.25"
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Utilities
+anyhow = "1"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true
